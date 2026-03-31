@@ -1,42 +1,77 @@
+REM SPDX-License-Identifier: MIT
+REM Copyright (c) 2026 Bharatvaj Hemanth <bharatvaj@yahoo.com>
+
 @echo off
-setlocal enabledelayedexpansion
+setlocal EnableDelayedExpansion
 
-rem TODO Follow the official path preference of airblade/voom
-set VIM_PLUGIN_PATH=%USERPROFILE%\.local\share\vim\pack\voom\start
-if NOT EXIST %VIM_PLUGIN_PATH% (
-    mkdir %VIM_PLUGIN_PATH%
+if not defined VOOM_DEFAULT_PROVIDER set VOOM_DEFAULT_PROVIDER=https://github.com
+
+if not defined XDG_CONFIG_HOME set XDG_CONFIG_HOME=%USERPROFILE%\.config
+if not defined XDG_DATA_HOME set XDG_DATA_HOME=%USERPROFILE%\.local\share
+
+if not defined VIM_DIR set VIM_DIR=%USERPROFILE%\.vim
+if not defined VOOM_PLUGINS_DIR set VOOM_PLUGINS_DIR=%XDG_DATA_HOME%\vim\pack\voom\start
+
+if not defined VOOM_MANIFEST (
+	for /d %%d in ("%XDG_CONFIG_HOME%\vim" "%VIM_DIR%") do (
+		if exist "%%~d\plugins" (
+			set "VOOM_MANIFEST=%%~d\plugins"
+		)
+	)
 )
 
-cd %VIM_PLUGIN_PATH%
-
-set found=0
-set gpath=""
-set fpath=""
-for /f "tokens=*" %%i in ('dir /b') do (
-    REM TODO Add support for repo names in the future
-    set fpath=%%i
-
-    for /f "tokens=*" %%j in ('type %USERPROFILE%\.local\share\vim\plugins ^| findstr /v "^#"') do (
-        for /f "delims=/ tokens=2" %%a in ("%%j") do set gpath=%%a
-            if "!gpath!" EQU "!fpath!" (
-                set found=1
-            )
-    )
-
-    if not !found! EQU 1 (
-        echo Removing "!fpath!"
-        rmdir /s/q "!fpath!"
-    )
-    set found=0
+if not exist "!VOOM_MANIFEST!" (
+	echo Could not locate: '%VOOM_MANIFEST%'. >&2
+	exit /b 1
 )
 
-for /f "tokens=*" %%i in ('type %USERPROFILE%\.local\share\vim\plugins ^| findstr /v "^#"') do (
-    for /f "delims=/ tokens=2" %%a in ("%%i") do set gpath=%%a
-    if not exist !gpath!/.git (
-        git clone https://github.com/%%i
-    )
+
+if not exist %VOOM_PLUGINS_DIR% mkdir %VOOM_PLUGINS_DIR%
+
+cd "%VOOM_PLUGINS_DIR%"
+for /d %%d in (. "*") do set dirs=!dirs!^
+
+%%d
+
+for /f "tokens=*" %%j in ('type "%VOOM_MANIFEST%" ^| findstr /v "^#" ^| sort') do (
+	for %%I in ("%%j") do set "reponame=%%~nxI"
+
+	if "!reponame:~-4!"==".git" (
+		echo x '.git' not allowed at end in entry: %%j
+		exit /b 1
+	)
+
+	for /f "tokens=*" %%d in ("!dirs!") do (
+
+		if "%%d"=="!reponame!" (
+			set dirs=!dirs:^
+
+%%d=!
+		) else if not exist "!reponame!/.git" (
+			set dirs=!dirs:^
+
+%%d=!
+			set jtmp=%%j
+			echo v %%j
+			if not "y!jtmp:://=!!jtmp:@=!"=="y!jtmp!!jtmp!" (
+				git clone -q "%%j"
+			) else (
+				git clone -q "%VOOM_DEFAULT_PROVIDER%/%%j"
+			)
+			if ERRORLEVEL 1 (
+				exit /b 1
+			)
+		)
+	)
 )
 
-vim -c "helptags ALL" -c quit >nul 2>&1
+for /f "tokens=*" %%d in ("!dirs!") do (
+	if not "%%d"=="." (
+		echo Removing %%d
+		rmdir /s/q "%%d"
+	)
+)
 
-endlocal
+vim -c "helptags ALL" -c quit 2>&1 >nul
+
+endlocal DisableDelayedExpansion
